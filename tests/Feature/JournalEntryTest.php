@@ -415,6 +415,60 @@ class JournalEntryTest extends TestCaseWithMigrations
 
     }
 
+    public function testAddSplitWithReferenceDomainCodeAndUuid()
+    {
+        // First we need a ledger
+        $response = $this->createLedger(['template'], ['template' => 'manufacturer_1.0']);
+        $this->isSuccessful($response, 'ledger');
+
+        // Add a reference
+        $ref = new JournalReference();
+        $ref->code = 'cust2';
+        $domain = LedgerDomain::where('code', 'CORP')->first();
+        $this->assertNotNull($domain);
+        $ref->domainUuid = $domain->domainUuid;
+        $ref->save();
+        $ref->refresh();
+
+        // Add a split with a reference that includes both domain code and uuid.
+        $requestData = [
+            'currency' => 'CAD',
+            'description' => 'Reference domain code+uuid payload.',
+            'date' => '2021-11-12',
+            'details' => [
+                [
+                    'code' => '4110',
+                    'amount' => '-520.00',
+                ],
+                [
+                    'code' => '1120',
+                    'amount' => '500.00',
+                    'reference' => [
+                        'code' => 'cust2',
+                        'domain' => [
+                            'code' => 'CORP',
+                            'uuid' => $domain->domainUuid,
+                        ],
+                    ],
+                ],
+                [
+                    'code' => '2250',
+                    'amount' => '20.00',
+                ],
+            ]
+        ];
+        $response = $this->json(
+            'post', 'api/ledger/entry/add', $requestData
+        );
+
+        $actual = $this->isSuccessful($response);
+        $this->hasRevisionElements($actual->entry);
+        $journalEntry = JournalEntry::find($actual->entry->id);
+        $this->assertNotNull($journalEntry);
+        $detail = $journalEntry->details()->skip(1)->first();
+        $this->assertEquals($ref->journalReferenceUuid, $detail->journalReferenceUuid);
+    }
+
     public function testAddSubJournal()
     {
         // First we need a ledger

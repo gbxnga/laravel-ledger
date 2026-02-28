@@ -27,7 +27,7 @@ class EntityRef extends Message
      * @param string|null $code
      * @param string|null $uuid
      */
-    public function __construct(string $code = null, string $uuid = null)
+    public function __construct(?string $code = null, ?string $uuid = null)
     {
         if ($code !== null) {
             $this->code = $code;
@@ -68,6 +68,16 @@ class EntityRef extends Message
     public static function fromMixed($data, int $opFlags = 0): EntityRef
     {
         if (is_array($data)) {
+            if ($opFlags === 0) {
+                $entityRef = new EntityRef();
+                if (isset($data['code']) && $data['code'] !== '') {
+                    $entityRef->code = $data['code'];
+                }
+                if (isset($data['uuid']) && $data['uuid'] !== '') {
+                    $entityRef->uuid = $data['uuid'];
+                }
+                return $entityRef;
+            }
             $entityRef = EntityRef::fromArray($data, $opFlags);
         } else {
             $entityRef = new EntityRef();

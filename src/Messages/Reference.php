@@ -17,7 +17,7 @@ class Reference extends Message
         'code', 'extra',
         ['revision', self::OP_DELETE | self::OP_UPDATE],
         ['toCode', self::OP_UPDATE],
-        'uuid',
+        [['journalReferenceUuid', 'uuid'], self::ALL_OPS],
     ];
 
     public EntityRef $domain;
@@ -41,9 +41,6 @@ class Reference extends Message
         $reference->copy($data, $opFlags);
         if (isset($data['domain'])) {
             $reference->domain = EntityRef::fromMixed($data['domain']);
-        }
-        if (isset($data['uuid'])) {
-            $reference->journalReferenceUuid = $data['uuid'];
         }
         if ($opFlags & self::F_VALIDATE) {
             $reference->validate($opFlags);

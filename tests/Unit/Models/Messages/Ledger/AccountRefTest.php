@@ -33,4 +33,11 @@ class AccountRefTest extends TestCase
         $this->assertEquals('some-fake-uuid', $parentRef->uuid);
     }
 
+    public function testFromMixedWithZeroOpFlagsPreservesCodeAndUuid()
+    {
+        $parentRef = EntityRef::fromMixed($this->base, 0);
+        $this->assertEquals('1010', $parentRef->code);
+        $this->assertEquals('some-fake-uuid', $parentRef->uuid);
+    }
+
 }
