@@ -20,7 +20,7 @@ A maintained fork of [abivia/ledger](https://github.com/abivia/ledger), upgraded
 - Atomic transactions with concurrent update blocking.
 - Reference system supports soft linking to other ERP components.
 - Bulk journal detail inserts and aggregated balance updates for high-volume posting.
-- Automatic batch coalescing — consecutive `entry/add` operations in a batch are merged into a single bulk write pass.
+- Automatic batch coalescing — consecutive `entry/add` and `entry/delete` operations in a batch are merged into bulk passes.
 - Configurable chunk sizes and optional performance metrics logging.
 
 ## Requirements
@@ -69,7 +69,7 @@ The configuration file is installed as `config/ledger.php`. You can enable/disab
 
 ### Performance Tuning
 
-Journal detail inserts and balance updates are performed in bulk using chunked queries. When a batch contains consecutive `entry/add` operations, they are automatically coalesced into a single write pass — reducing database round-trips from O(n) per detail line to O(1) chunked operations.
+Journal detail inserts and balance updates are performed in bulk using chunked queries. When a batch contains consecutive `entry/add` or `entry/delete` operations, they are automatically coalesced into grouped passes — reducing database round-trips from O(n) per detail line to O(1) chunked operations.
 
 All settings live under `ledger.performance` in `config/ledger.php` and can be overridden via environment variables:
 
@@ -80,7 +80,8 @@ All settings live under `ledger.performance` in `config/ledger.php` and can be o
 | `LEDGER_ROOT_DETAIL_CHUNK` | `1000` | Max rows per opening-balance detail insert |
 | `LEDGER_ROOT_BALANCE_CHUNK` | `500` | Max rows per opening-balance upsert |
 | `LEDGER_BATCH_COALESCE_ENTRY_ADD` | `true` | Merge consecutive `entry/add` batch operations into one bulk write |
-| `LEDGER_BATCH_COALESCE_MIN_GROUP` | `2` | Minimum consecutive adds required before coalescing activates |
+| `LEDGER_BATCH_COALESCE_ENTRY_DELETE` | `true` | Merge consecutive `entry/delete` batch operations into one bulk delete/reversal pass |
+| `LEDGER_BATCH_COALESCE_MIN_GROUP` | `2` | Minimum consecutive add/delete operations required before coalescing activates |
 | `LEDGER_PERFORMANCE_METRICS` | `false` | Emit structured performance logs (detail rows, chunks, elapsed time) |
 
 ## Updating

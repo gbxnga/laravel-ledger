@@ -133,9 +133,20 @@ class Batch extends Message
             && (($message->getOpFlags() & self::ALL_OPS) === self::OP_ADD);
     }
 
-    private function coalescingEnabled(): bool
+    private function isBulkDeleteCandidate(Message $message): bool
+    {
+        return $message instanceof Entry
+            && (($message->getOpFlags() & self::ALL_OPS) === self::OP_DELETE);
+    }
+
+    private function addCoalescingEnabled(): bool
     {
         return (bool) config('ledger.performance.batch.coalesce_entry_add', true);
+    }
+
+    private function deleteCoalescingEnabled(): bool
+    {
+        return (bool) config('ledger.performance.batch.coalesce_entry_delete', true);
     }
 
     private function coalescingMinGroup(): int
@@ -175,7 +186,7 @@ class Batch extends Message
                 $message = $this->list[$step];
                 if (
                     $this->transaction
-                    && $this->coalescingEnabled()
+                    && $this->addCoalescingEnabled()
                     && $this->isBulkAddCandidate($message)
                 ) {
                     $bulkMessages = [$message];
@@ -197,6 +208,7 @@ class Batch extends Message
                             ];
                         }
                         $this->logBatchPerformance([
+                            'operation' => 'entry_add',
                             'coalesced' => true,
                             'group_size' => count($bulkMessages),
                             'elapsed_ms' => round((microtime(true) - $startedAt) * 1000, 3),
@@ -204,6 +216,49 @@ class Batch extends Message
                         continue;
                     }
                     $this->logBatchPerformance([
+                        'operation' => 'entry_add',
+                        'coalesced' => false,
+                        'group_size' => count($bulkMessages),
+                        'reason' => 'below_threshold',
+                    ]);
+                    foreach ($bulkMessages as $singleMessage) {
+                        $result = $singleMessage->run();
+                        $results['batch'][] = $result;
+                        if ($result['errors'] ?? false) {
+                            throw Breaker::withCode(Breaker::BATCH_FAILED);
+                        }
+                    }
+                    continue;
+                }
+                if (
+                    $this->transaction
+                    && $this->deleteCoalescingEnabled()
+                    && $this->isBulkDeleteCandidate($message)
+                ) {
+                    $bulkMessages = [$message];
+                    while (
+                        $step + 1 < $count
+                        && $this->isBulkDeleteCandidate($this->list[$step + 1])
+                    ) {
+                        $bulkMessages[] = $this->list[++$step];
+                    }
+                    if (count($bulkMessages) >= $this->coalescingMinGroup()) {
+                        $startedAt = microtime(true);
+                        $entryController ??= new JournalEntryController();
+                        $entryController->deleteBulk($bulkMessages);
+                        foreach ($bulkMessages as $bulkMessage) {
+                            $results['batch'][] = ['success' => true];
+                        }
+                        $this->logBatchPerformance([
+                            'operation' => 'entry_delete',
+                            'coalesced' => true,
+                            'group_size' => count($bulkMessages),
+                            'elapsed_ms' => round((microtime(true) - $startedAt) * 1000, 3),
+                        ]);
+                        continue;
+                    }
+                    $this->logBatchPerformance([
+                        'operation' => 'entry_delete',
                         'coalesced' => false,
                         'group_size' => count($bulkMessages),
                         'reason' => 'below_threshold',

@@ -155,6 +155,143 @@ class JournalEntryController extends Controller
     }
 
     /**
+     * Delete multiple journal entries with coalesced detail deletes and balance reversals.
+     *
+     * @param Entry[] $messages
+     * @return void
+     * @throws Breaker
+     * @throws Exception
+     */
+    public function deleteBulk(array $messages): void
+    {
+        if (count($messages) === 0) {
+            return;
+        }
+        $startedAt = microtime(true);
+        $inTransaction = false;
+        $journalEntryIds = [];
+        $seenEntryIds = [];
+        try {
+            if (DB::transactionLevel() === 0) {
+                DB::beginTransaction();
+                $inTransaction = true;
+            }
+            foreach ($messages as $message) {
+                if (!($message instanceof Entry)) {
+                    throw new Exception(__('Bulk delete expects entry messages.'));
+                }
+                $message->validate(Message::OP_DELETE);
+                if (isset($seenEntryIds[$message->id])) {
+                    throw Breaker::withCode(
+                        Breaker::RULE_VIOLATION,
+                        [__('Journal entry :id does not exist', ['id' => $message->id])]
+                    );
+                }
+                $seenEntryIds[$message->id] = true;
+                $journalEntryIds[] = $message->id;
+            }
+
+            $journalEntries = $this->fetchJournalEntriesForDelete($journalEntryIds);
+            foreach ($messages as $message) {
+                /** @var JournalEntry|null $journalEntry */
+                $journalEntry = $journalEntries->get($message->id);
+                if ($journalEntry === null) {
+                    throw Breaker::withCode(
+                        Breaker::RULE_VIOLATION,
+                        [__('Journal entry :id does not exist', ['id' => $message->id])]
+                    );
+                }
+                $journalEntry->checkRevision($message->revision ?? null);
+                $journalEntry->checkUnlocked();
+            }
+
+            $currencyCodes = [];
+            foreach ($journalEntries as $journalEntry) {
+                $currencyCodes[$journalEntry->currency] = true;
+            }
+            $currenciesByCode = $this->loadCurrenciesByCode(array_keys($currencyCodes));
+            $entryContext = [];
+            foreach ($journalEntries as $journalEntry) {
+                /** @var LedgerCurrency|null $ledgerCurrency */
+                $ledgerCurrency = $currenciesByCode[$journalEntry->currency] ?? null;
+                if ($ledgerCurrency === null) {
+                    throw Breaker::withCode(
+                        Breaker::INVALID_DATA,
+                        [__('Currency :code not found.', ['code' => $journalEntry->currency])]
+                    );
+                }
+                $entryContext[$journalEntry->journalEntryId] = [
+                    'domainUuid' => $journalEntry->domainUuid,
+                    'currency' => $journalEntry->currency,
+                    'decimals' => $ledgerCurrency->decimals,
+                ];
+            }
+
+            $groupedBalanceDeltas = [];
+            $detailRowCount = 0;
+            foreach (array_chunk($journalEntryIds, $this->detailChunkSize()) as $chunkEntryIds) {
+                $journalDetails = DB::table('journal_details')
+                    ->whereIn('journalEntryId', $chunkEntryIds)
+                    ->get(['journalEntryId', 'ledgerUuid', 'amount']);
+                $detailRowCount += $journalDetails->count();
+                foreach ($journalDetails as $oldDetail) {
+                    $context = $entryContext[$oldDetail->journalEntryId] ?? null;
+                    if ($context === null) {
+                        throw new Exception(
+                            __('Journal detail references unknown entry :id.', ['id' => $oldDetail->journalEntryId])
+                        );
+                    }
+                    if (!isset($groupedBalanceDeltas[$context['domainUuid']][$context['currency']])) {
+                        $groupedBalanceDeltas[$context['domainUuid']][$context['currency']] = [
+                            'decimals' => $context['decimals'],
+                            'deltas' => [],
+                        ];
+                    }
+                    $deltas = &$groupedBalanceDeltas[$context['domainUuid']][$context['currency']]['deltas'];
+                    if (!isset($deltas[$oldDetail->ledgerUuid])) {
+                        $deltas[$oldDetail->ledgerUuid] = '0';
+                    }
+                    $deltas[$oldDetail->ledgerUuid] = bcsub(
+                        $deltas[$oldDetail->ledgerUuid],
+                        $oldDetail->amount,
+                        $context['decimals']
+                    );
+                }
+            }
+
+            $entryChunkCount = $this->detailChunkCount(count($journalEntryIds));
+            $this->deleteDetailRowsByEntryIds($journalEntryIds);
+            $this->deleteJournalEntriesByIds($journalEntryIds);
+            $this->applyGroupedBalanceDeltas($groupedBalanceDeltas, false);
+            if ($inTransaction) {
+                DB::commit();
+                $inTransaction = false;
+            }
+            foreach ($messages as $message) {
+                $this->auditLog($message);
+            }
+            $this->logPerformanceMetric(
+                'entry_delete_bulk',
+                [
+                    'entries' => count($messages),
+                    'detail_rows' => $detailRowCount,
+                    'detail_select_chunks' => $entryChunkCount,
+                    'detail_delete_chunks' => $entryChunkCount,
+                    'entry_delete_chunks' => $entryChunkCount,
+                    'balance_keys' => $this->groupedBalanceKeyCount($groupedBalanceDeltas),
+                    'balance_chunks' => $this->groupedBalanceChunkCount($groupedBalanceDeltas),
+                    'elapsed_ms' => round((microtime(true) - $startedAt) * 1000, 3),
+                ]
+            );
+        } catch (Exception $exception) {
+            if ($inTransaction) {
+                DB::rollBack();
+            }
+            throw $exception;
+        }
+    }
+
+    /**
      * Write the journal detail records and update balances.
      *
      * @param JournalEntry $journalEntry
@@ -281,7 +418,7 @@ class JournalEntryController extends Controller
     }
 
     /**
-     * Reload journal entries in one query while preserving input order.
+     * Reload journal entries in bounded queries while preserving input order.
      *
      * @param array<int> $journalEntryIds
      * @return array<int, JournalEntry>
@@ -292,9 +429,13 @@ class JournalEntryController extends Controller
         if (count($journalEntryIds) === 0) {
             return [];
         }
-        $entriesById = JournalEntry::whereIn('journalEntryId', $journalEntryIds)
-            ->get()
-            ->keyBy('journalEntryId');
+        $entriesById = new Collection();
+        foreach (array_chunk($journalEntryIds, $this->detailChunkSize()) as $chunkEntryIds) {
+            $chunkEntries = JournalEntry::whereIn('journalEntryId', $chunkEntryIds)->get();
+            foreach ($chunkEntries as $chunkEntry) {
+                $entriesById->put($chunkEntry->journalEntryId, $chunkEntry);
+            }
+        }
         $ordered = [];
         foreach ($journalEntryIds as $journalEntryId) {
             /** @var JournalEntry|null $journalEntry */
@@ -533,6 +674,79 @@ class JournalEntryController extends Controller
             false,
             $this->ledgerCurrency->decimals
         );
+    }
+
+    /**
+     * @param array<int> $journalEntryIds
+     * @return Collection
+     */
+    private function fetchJournalEntriesForDelete(array $journalEntryIds): Collection
+    {
+        if (count($journalEntryIds) === 0) {
+            return new Collection();
+        }
+        $journalEntries = new Collection();
+        foreach (array_chunk($journalEntryIds, $this->detailChunkSize()) as $chunkEntryIds) {
+            $chunkEntries = JournalEntry::whereIn('journalEntryId', $chunkEntryIds)
+                ->lockForUpdate()
+                ->get();
+            foreach ($chunkEntries as $chunkEntry) {
+                $journalEntries->put($chunkEntry->journalEntryId, $chunkEntry);
+            }
+        }
+
+        return $journalEntries;
+    }
+
+    /**
+     * @param array<int, string> $currencyCodes
+     * @return array<string, LedgerCurrency>
+     * @throws Breaker
+     */
+    private function loadCurrenciesByCode(array $currencyCodes): array
+    {
+        if (count($currencyCodes) === 0) {
+            return [];
+        }
+        $ledgerCurrencies = LedgerCurrency::whereIn('code', $currencyCodes)
+            ->get()
+            ->keyBy('code');
+        foreach ($currencyCodes as $currencyCode) {
+            if (!$ledgerCurrencies->has($currencyCode)) {
+                throw Breaker::withCode(
+                    Breaker::INVALID_DATA,
+                    [__('Currency :code not found.', ['code' => $currencyCode])]
+                );
+            }
+        }
+
+        return $ledgerCurrencies->all();
+    }
+
+    /**
+     * @param array<int> $journalEntryIds
+     * @return void
+     */
+    private function deleteDetailRowsByEntryIds(array $journalEntryIds): void
+    {
+        foreach (array_chunk($journalEntryIds, $this->detailChunkSize()) as $chunkEntryIds) {
+            DB::table('journal_details')
+                ->whereIn('journalEntryId', $chunkEntryIds)
+                ->delete();
+        }
+    }
+
+    /**
+     * @param array<int> $journalEntryIds
+     * @return void
+     */
+    private function deleteJournalEntriesByIds(array $journalEntryIds): void
+    {
+        foreach (array_chunk($journalEntryIds, $this->detailChunkSize()) as $chunkEntryIds) {
+            DB::table('journal_entries')
+                ->whereIn('journalEntryId', $chunkEntryIds)
+                ->delete();
+        }
     }
 
     /**

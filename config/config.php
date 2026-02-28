@@ -28,7 +28,9 @@ return [
         'batch' => [
             // Collapse consecutive entry/add operations into a bulk write pass.
             'coalesce_entry_add' => env('LEDGER_BATCH_COALESCE_ENTRY_ADD', true),
-            // Minimum consecutive entry/add operations required before coalescing.
+            // Collapse consecutive entry/delete operations into a bulk delete pass.
+            'coalesce_entry_delete' => env('LEDGER_BATCH_COALESCE_ENTRY_DELETE', true),
+            // Minimum consecutive entry add/delete operations required before coalescing.
             'coalesce_min_group' => env('LEDGER_BATCH_COALESCE_MIN_GROUP', 2),
         ],
         'entry' => [

@@ -3,6 +3,7 @@
 namespace Abivia\Ledger\Tests\Feature;
 
 use Abivia\Ledger\Models\LedgerAccount;
+use Abivia\Ledger\Models\LedgerBalance;
 use Abivia\Ledger\Tests\TestCaseWithMigrations;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -53,6 +54,40 @@ class JournalEntryPerformanceTest extends TestCaseWithMigrations
         }
 
         return $codes;
+    }
+
+    /**
+     * Create sales entries and return their id/revision data for delete calls.
+     *
+     * @return array<int, array{id: int, revision: string}>
+     */
+    private function createSalesEntries(int $entryCount): array
+    {
+        $entries = [];
+        for ($index = 0; $index < $entryCount; ++$index) {
+            $amount = number_format($index + 1, 2, '.', '');
+            $requestData = [
+                'currency' => 'CAD',
+                'description' => "Delete batch source $index",
+                'date' => '2021-11-12',
+                'details' => [
+                    ['code' => '1310', 'debit' => $amount],
+                    ['code' => '4110', 'credit' => $amount],
+                ],
+            ];
+            $response = $this->json(
+                'post',
+                'api/ledger/entry/add',
+                $requestData
+            );
+            $actual = $this->isSuccessful($response);
+            $entries[] = [
+                'id' => $actual->entry->id,
+                'revision' => $actual->entry->revision,
+            ];
+        }
+
+        return $entries;
     }
 
     public function setUp(): void
@@ -215,6 +250,79 @@ class JournalEntryPerformanceTest extends TestCaseWithMigrations
         $this->assertSame($expectedBalancePasses * 2, $ledgerBalanceInserts);
     }
 
+    public function testBatchCoalescesConsecutiveEntryDeletes()
+    {
+        $response = $this->createLedger(['template'], ['template' => 'manufacturer_1.0']);
+        $this->isSuccessful($response, 'ledger');
+        $createdEntries = $this->createSalesEntries(5);
+
+        $requestData = [
+            'transaction' => true,
+            'list' => [],
+        ];
+        foreach ($createdEntries as $createdEntry) {
+            $requestData['list'][] = [
+                'method' => 'entry/delete',
+                'payload' => [
+                    'id' => $createdEntry['id'],
+                    'revision' => $createdEntry['revision'],
+                ],
+            ];
+        }
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $response = $this->json(
+            'post', 'api/ledger/batch', $requestData
+        );
+        DB::disableQueryLog();
+
+        $actual = $this->isSuccessful($response, 'batch');
+        $this->assertCount(5, $actual->batch);
+        $queries = DB::getQueryLog();
+        $journalDetailSelects = 0;
+        $journalDetailDeletes = 0;
+        $journalEntryDeletes = 0;
+        $ledgerBalanceSelects = 0;
+        foreach ($queries as $query) {
+            $sql = strtolower($query['query']);
+            $prefix = ltrim($sql);
+            if (str_starts_with($prefix, 'select') && preg_match('/\bjournal_details\b/', $sql)) {
+                ++$journalDetailSelects;
+            }
+            if (str_starts_with($prefix, 'delete') && preg_match('/\bjournal_details\b/', $sql)) {
+                ++$journalDetailDeletes;
+            }
+            if (str_starts_with($prefix, 'delete') && preg_match('/\bjournal_entries\b/', $sql)) {
+                ++$journalEntryDeletes;
+            }
+            if (str_starts_with($prefix, 'select') && preg_match('/\bledger_balances\b/', $sql)) {
+                ++$ledgerBalanceSelects;
+            }
+        }
+
+        $entryChunkCount = (int) ceil(
+            count($createdEntries) / max(1, (int) config('ledger.performance.entry.detail_chunk', 1000))
+        );
+        $balanceChunk = max(1, (int) config('ledger.performance.entry.balance_chunk', 500));
+        $expectedBalancePasses = (int) ceil(2 / $balanceChunk);
+        $this->assertSame($entryChunkCount, $journalDetailSelects);
+        $this->assertSame($entryChunkCount, $journalDetailDeletes);
+        $this->assertSame($entryChunkCount, $journalEntryDeletes);
+        $this->assertSame($expectedBalancePasses, $ledgerBalanceSelects);
+
+        $accounts = LedgerAccount::whereIn('code', ['1310', '4110'])
+            ->pluck('ledgerUuid', 'code');
+        $this->assertCount(2, $accounts);
+        foreach (['1310', '4110'] as $code) {
+            $ledgerBalance = LedgerBalance::where('ledgerUuid', $accounts[$code])
+                ->where('currency', 'CAD')
+                ->first();
+            $this->assertNotNull($ledgerBalance);
+            $this->assertEquals('0.00', $ledgerBalance->balance, "Code $code");
+        }
+    }
+
     public function testBatchCoalesceCanBeDisabled()
     {
         config(['ledger.performance.batch.coalesce_entry_add' => false]);
@@ -259,6 +367,53 @@ class JournalEntryPerformanceTest extends TestCaseWithMigrations
             }
         }
         $this->assertSame(5, $journalDetailInserts);
+    }
+
+    public function testBatchDeleteCoalesceCanBeDisabled()
+    {
+        config(['ledger.performance.batch.coalesce_entry_delete' => false]);
+        $response = $this->createLedger(['template'], ['template' => 'manufacturer_1.0']);
+        $this->isSuccessful($response, 'ledger');
+        $createdEntries = $this->createSalesEntries(5);
+
+        $requestData = [
+            'transaction' => true,
+            'list' => [],
+        ];
+        foreach ($createdEntries as $createdEntry) {
+            $requestData['list'][] = [
+                'method' => 'entry/delete',
+                'payload' => [
+                    'id' => $createdEntry['id'],
+                    'revision' => $createdEntry['revision'],
+                ],
+            ];
+        }
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $response = $this->json(
+            'post', 'api/ledger/batch', $requestData
+        );
+        DB::disableQueryLog();
+
+        $actual = $this->isSuccessful($response, 'batch');
+        $this->assertCount(5, $actual->batch);
+        $queries = DB::getQueryLog();
+        $journalDetailDeletes = 0;
+        $journalEntryDeletes = 0;
+        foreach ($queries as $query) {
+            $sql = strtolower($query['query']);
+            $prefix = ltrim($sql);
+            if (str_starts_with($prefix, 'delete') && preg_match('/\bjournal_details\b/', $sql)) {
+                ++$journalDetailDeletes;
+            }
+            if (str_starts_with($prefix, 'delete') && preg_match('/\bjournal_entries\b/', $sql)) {
+                ++$journalEntryDeletes;
+            }
+        }
+        $this->assertSame(5, $journalDetailDeletes);
+        $this->assertSame(5, $journalEntryDeletes);
     }
 
     public function testBatchTimingBenchmark()
