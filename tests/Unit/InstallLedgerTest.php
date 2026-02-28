@@ -39,7 +39,6 @@ class InstallLedgerTest extends TestCase
         $this->assertTrue(File::exists(config_path('ledger.php')));
     }
 
-    /** @test */
     public function testConfigIsOverwritten()
     {
         // Fake an existing config file

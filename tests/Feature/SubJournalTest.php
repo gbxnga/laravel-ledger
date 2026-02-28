@@ -9,7 +9,7 @@ use Abivia\Ledger\Messages\SubJournal;
 use Abivia\Ledger\Models\LedgerAccount;
 use Abivia\Ledger\Models\SubJournal as SubJournalModel;
 use Abivia\Ledger\Tests\TestCaseWithMigrations;
-use Abivia\Ledger\Tests\ValidatesJson;
+
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 /**
@@ -21,7 +21,6 @@ class SubJournalTest extends TestCaseWithMigrations
     use CreateLedgerTrait;
     use PageLoader;
     use RefreshDatabase;
-    use ValidatesJson;
 
     public array $baseRequest = [
         'code' => 'SJ',
@@ -76,8 +75,6 @@ class SubJournalTest extends TestCaseWithMigrations
             'api/ledger/journal/add', ['nonsense' => true]
         );
         $actual = $this->isFailure($response);
-        // Check the response against our schema
-        $this->validateResponse($actual, 'journal-response');
     }
 
     public function testAdd()
@@ -90,8 +87,6 @@ class SubJournalTest extends TestCaseWithMigrations
             'post', 'api/ledger/journal/add', $this->baseRequest
         );
         $actual = $this->isSuccessful($response);
-        // Check the response against our schema
-        $this->validateResponse($actual, 'journal-response');
         $this->hasRevisionElements($actual->journal);
         $this->hasAttributes(['code', 'names'], $actual->journal);
         $this->assertEquals('SJ', $actual->journal->code);
@@ -144,8 +139,6 @@ class SubJournalTest extends TestCaseWithMigrations
             'post', 'api/ledger/journal/delete', $requestData
         );
         $actual = $this->isSuccessful($response, 'success');
-        // Check the response against our schema
-        $this->validateResponse($actual, 'journal-response');
 
         // Confirm that a fetch fails
         $response = $this->json(

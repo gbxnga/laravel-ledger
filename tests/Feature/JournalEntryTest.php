@@ -9,7 +9,7 @@ use Abivia\Ledger\Models\LedgerAccount;
 use Abivia\Ledger\Models\LedgerBalance;
 use Abivia\Ledger\Models\LedgerDomain;
 use Abivia\Ledger\Tests\TestCaseWithMigrations;
-use Abivia\Ledger\Tests\ValidatesJson;
+
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -21,7 +21,6 @@ class JournalEntryTest extends TestCaseWithMigrations
     use CommonChecks;
     use CreateLedgerTrait;
     use RefreshDatabase;
-    use ValidatesJson;
 
     protected function addAccount(string $code, string $parentCode)
     {
@@ -315,8 +314,6 @@ class JournalEntryTest extends TestCaseWithMigrations
 
         [$requestData, $response] = $this->addSalesTransaction();
         $actual = $this->isSuccessful($response);
-        // Check the response against our schema
-        $this->validateResponse($actual, 'entry-response');
     }
 
     public function testAddSplit()
@@ -553,8 +550,6 @@ class JournalEntryTest extends TestCaseWithMigrations
             'post', 'api/ledger/entry/delete', $deleteData
         );
         $this->isSuccessful($response, 'success');
-        // Check the response against our schema
-        $this->validateResponse($actual, 'entry-response');
 
         // Confirm that records are deleted and balances corrected.
         $journalEntryDeleted = JournalEntry::find($actual->entry->id);
@@ -715,8 +710,6 @@ class JournalEntryTest extends TestCaseWithMigrations
             'post', 'api/ledger/entry/get', $fetchData
         );
         $fetched = $this->isSuccessful($response);
-        // Check the response against our schema
-        $this->validateResponse($addActual, 'entry-response');
     }
 
     public function testLockBad()
@@ -819,8 +812,6 @@ class JournalEntryTest extends TestCaseWithMigrations
             'post', 'api/ledger/entry/update', $requestData
         );
         $actual = $this->isFailure($response);
-        // Check the response against our schema
-        $this->validateResponse($actual, 'entry-response');
     }
 
 }

@@ -1,0 +1,184 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        php-version: ['8.2', '8.3', '8.4']
+        laravel-version: ['11.*', '12.*']
+
+    name: PHP ${{ matrix.php-version }} - Laravel ${{ matrix.laravel-version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-version }}
+          extensions: bcmath, json, pdo, pdo_sqlite
+          coverage: xdebug
+
+      - name: Cache Composer packages
+        id: composer-cache
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: ${{ runner.os }}-php-${{ matrix.php-version }}-laravel-${{ matrix.laravel-version }}-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-php-${{ matrix.php-version }}-laravel-${{ matrix.laravel-version }}-
+
+      - name: Install dependencies for Laravel version
+        run: |
+          if [[ "${{ matrix.laravel-version }}" == "12.*" ]]; then
+            composer require "orchestra/testbench:^10.0" --no-interaction --update-with-dependencies
+          elif [[ "${{ matrix.laravel-version }}" == "11.*" ]]; then
+            composer require "orchestra/testbench:^9.0" --no-interaction --update-with-dependencies
+          else
+            composer install --prefer-dist --no-interaction --no-progress
+          fi
+
+      - name: Directory Permissions
+        run: |
+          chmod -R 777 storage
+          sudo chmod -R 777 vendor/orchestra/testbench-core/laravel
+
+      - name: Create Database
+        run: |
+          mkdir -p build/logs
+          touch tests/testbase.sqlite
+
+      - name: Run tests
+        run: vendor/bin/phpunit --coverage-clover=coverage.xml --coverage-text
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+  build:
+    runs-on: ubuntu-22.04
+    needs: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: bcmath, json, pdo, pdo_sqlite
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction --no-dev --optimize-autoloader
+
+      - name: Validate composer.json and composer.lock
+        run: composer validate --strict
+
+      - name: Archive package
+        run: |
+          mkdir -p build
+          zip -r build/abivia-ledger.zip . -x "*.git*" "tests/*" "build/*" "*.github*"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: package
+          path: build/
+
+  quality-gate:
+    runs-on: ubuntu-22.04
+    needs: test
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: bcmath, json, pdo, pdo_sqlite
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction
+
+      - name: Create Database
+        run: touch tests/testbase.sqlite
+
+      - name: Directory Permissions
+        run: |
+          chmod -R 777 storage
+          sudo chmod -R 777 vendor/orchestra/testbench-core/laravel
+
+      - name: Run quality checks
+        run: |
+          echo "Running quality gate checks..."
+
+          # Check for TODO/FIXME comments in production code
+          if grep -r --include="*.php" --exclude-dir=tests --exclude-dir=vendor "TODO\|FIXME" src/; then
+            echo "Found TODO/FIXME comments in production code"
+            exit 1
+          else
+            echo "No TODO/FIXME comments found in production code"
+          fi
+
+          # Check for debug statements
+          if grep -r --include="*.php" --exclude-dir=tests --exclude-dir=vendor "var_dump\|dd(\|dump(" src/; then
+            echo "Found debug statements in production code"
+            exit 1
+          else
+            echo "No debug statements found in production code"
+          fi
+
+  publish-packagist:
+    runs-on: ubuntu-22.04
+    needs: [test, build]
+    if: github.event_name == 'release' && github.event.action == 'published'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+
+      - name: Trigger Packagist update
+        env:
+          PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
+          PACKAGIST_API_TOKEN: ${{ secrets.PACKAGIST_API_TOKEN }}
+        run: |
+          if [[ ! -z "$PACKAGIST_USERNAME" && ! -z "$PACKAGIST_API_TOKEN" ]]; then
+            curl -X POST \
+              -H "Content-Type: application/json" \
+              -d '{"repository":{"url":"https://github.com/${{ github.repository }}"}}' \
+              "https://packagist.org/api/update-package?username=$PACKAGIST_USERNAME&apiToken=$PACKAGIST_API_TOKEN"
+          else
+            echo "Skipping Packagist update - credentials not configured"
+          fi
+
+  notify-release:
+    runs-on: ubuntu-22.04
+    needs: [publish-packagist]
+    if: github.event_name == 'release' && github.event.action == 'published'
+
+    steps:
+      - name: Notify release success
+        run: |
+          echo "Package published successfully!"
+          echo "Version: ${{ github.event.release.tag_name }}"
+          echo "Packagist: https://packagist.org/packages/gbxnga/laravel-ledger"

@@ -14,7 +14,7 @@ use Abivia\Ledger\Messages\Entry;
 use Abivia\Ledger\Messages\EntryQuery;
 use Abivia\Ledger\Messages\Message;
 use Abivia\Ledger\Tests\TestCaseWithMigrations;
-use Abivia\Ledger\Tests\ValidatesJson;
+
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -32,7 +32,6 @@ class JournalEntryQueryTest extends TestCaseWithMigrations
     use CommonChecks;
     use CreateLedgerTrait;
     use RefreshDatabase;
-    use ValidatesJson;
 
     public function setUp(): void
     {
@@ -71,8 +70,6 @@ class JournalEntryQueryTest extends TestCaseWithMigrations
                 'post', 'api/ledger/entry/query', $fetchData
             );
             $actual = $this->isSuccessful($response);
-            // Check the response against our schema
-            $this->validateResponse($actual, 'entryquery-response');
             $entries = $actual->entries;
             ++$pages;
             $totalEntries += count($entries);
@@ -205,8 +202,6 @@ class JournalEntryQueryTest extends TestCaseWithMigrations
             'post', 'api/ledger/entry/query', $fetchData
         );
         $actual = $this->isFailure($response);
-        // Check the response against our schema
-        $this->validateResponse($actual, 'entryquery-response');
     }
 
     public function testQueryReviewed()

@@ -4,6 +4,7 @@ namespace Abivia\Ledger\Tests\Unit\Root\Rules;
 
 use Abivia\Ledger\Root\Rules\LedgerRules;
 use Abivia\Ledger\Tests\TestCase;
+use PHPUnit\Framework\Attributes\Depends;
 
 class LedgerRootTest extends TestCase
 {
@@ -44,11 +45,8 @@ JSON;
         self::$ledger = $obj;
     }
 
-    /**
-     * @depends testHydration
-     * @return void
-     */
-    public function testEncode()
+    #[Depends('testHydration')]
+    public function testEncode(): void
     {
         $json = json_encode(self::$ledger);
         $expect = <<<JSON

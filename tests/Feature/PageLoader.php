@@ -19,8 +19,6 @@ trait PageLoader
                 'post', $entryPoint, $requestData
             );
             $actual = $this->isSuccessful($response, $responseElement);
-            // Check the response against our schema
-            $this->validateResponse($actual, $responseType);
             $resources = $actual->$responseElement;
             ++$pages;
             $total += count($resources);

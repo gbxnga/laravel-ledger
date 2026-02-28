@@ -4,6 +4,7 @@ namespace Abivia\Ledger\Tests\Unit\Root\Rules;
 
 use Abivia\Ledger\Root\Rules\Section;
 use Abivia\Ledger\Tests\TestCase;
+use PHPUnit\Framework\Attributes\Depends;
 
 class SectionTest extends TestCase
 {
@@ -56,11 +57,8 @@ JSON;
         $this->assertTrue($obj->credit);
     }
 
-    /**
-     * @depends testHydration
-     * @return void
-     */
-    public function testEncode()
+    #[Depends('testHydration')]
+    public function testEncode(): void
     {
         $json = json_encode(self::$section);
         $expect = '{"codes":["1100"],"credit":true,'

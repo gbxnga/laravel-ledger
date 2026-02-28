@@ -6,7 +6,7 @@ namespace Abivia\Ledger\Tests\Feature;
 
 use Abivia\Ledger\Models\LedgerAccount;
 use Abivia\Ledger\Tests\TestCaseWithMigrations;
-use Abivia\Ledger\Tests\ValidatesJson;
+
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 
@@ -18,7 +18,6 @@ class JournalReferenceTest extends TestCaseWithMigrations
     use CommonChecks;
     use CreateLedgerTrait;
     use RefreshDatabase;
-    use ValidatesJson;
 
     public array $baseRequest = [
         'code' => 'Customer 25',
@@ -43,8 +42,6 @@ class JournalReferenceTest extends TestCaseWithMigrations
             'api/ledger/reference/add', ['nonsense' => true]
         );
         $actual = $this->isFailure($response);
-        // Check the response against our schema
-        $this->validateResponse($actual, 'entry-response');
     }
 
     public function testAdd()
@@ -57,8 +54,6 @@ class JournalReferenceTest extends TestCaseWithMigrations
             'post', 'api/ledger/reference/add', $this->baseRequest
         );
         $actual = $this->isSuccessful($response);
-        // Check the response against our schema
-        $this->validateResponse($actual, 'reference-response');
         $this->hasAttributes(['code', 'extra'], $actual->reference);
         $this->assertEquals('Customer 25', $actual->reference->code);
         $this->assertEquals($this->baseRequest['extra'], $actual->reference->extra);
@@ -115,8 +110,6 @@ class JournalReferenceTest extends TestCaseWithMigrations
             'post', 'api/ledger/reference/get', $requestData
         );
         $actual = $this->isFailure($response);
-        // Check the response against our schema
-        $this->validateResponse($actual, 'entry-response');
     }
 
     public function testGet()

@@ -4,6 +4,7 @@ namespace Abivia\Ledger\Tests\Unit\Root\Rules;
 
 use Abivia\Ledger\Root\Rules\Name;
 use Abivia\Ledger\Tests\TestCase;
+use PHPUnit\Framework\Attributes\Depends;
 
 class NameTest extends TestCase
 {
@@ -19,11 +20,8 @@ class NameTest extends TestCase
         self::$name = $obj;
     }
 
-    /**
-     * @depends testHydration
-     * @return void
-     */
-    public function testEncode()
+    #[Depends('testHydration')]
+    public function testEncode(): void
     {
         $json = json_encode(self::$name);
         $expect = '{"language":"en","name":"This is a name"}';

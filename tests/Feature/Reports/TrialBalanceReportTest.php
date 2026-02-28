@@ -12,6 +12,7 @@ use Abivia\Ledger\Tests\Feature\CreateLedgerTrait;
 use Abivia\Ledger\Tests\TestCaseWithMigrations;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use PHPUnit\Framework\Attributes\Depends;
 use Illuminate\Support\Facades\DB;
 
 class TrialBalanceReportTest extends TestCaseWithMigrations
@@ -75,11 +76,8 @@ class TrialBalanceReportTest extends TestCaseWithMigrations
         return $reportData;
     }
 
-    /**
-     * @depends testCollect
-     * @return void
-     */
-    public function testPrepare(ReportData $reportData)
+    #[Depends('testCollect')]
+    public function testPrepare(ReportData $reportData): void
     {
         $this->loadRandomBaseline();
         $report = new TrialBalanceReport();

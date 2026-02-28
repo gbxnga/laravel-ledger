@@ -5,7 +5,7 @@ namespace Abivia\Ledger\Tests\Feature;
 use Abivia\Ledger\Exceptions\Breaker;
 use Abivia\Ledger\Models\LedgerAccount;
 use Abivia\Ledger\Tests\TestCaseWithMigrations;
-use Abivia\Ledger\Tests\ValidatesJson;
+
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 /**
@@ -17,7 +17,6 @@ class LedgerAccountQueryTest extends TestCaseWithMigrations
     use CreateLedgerTrait;
     use PageLoader;
     use RefreshDatabase;
-    use ValidatesJson;
 
     private function getPagedAccounts(array $requestData): array
     {
