@@ -24,5 +24,29 @@ return [
     // 'reports' => [
     //     'trialBalance' => Abivia\Ledger\Reports\TrialBalanceReport::class,
     // ],
+    'performance' => [
+        'batch' => [
+            // Collapse consecutive entry/add operations into a bulk write pass.
+            'coalesce_entry_add' => env('LEDGER_BATCH_COALESCE_ENTRY_ADD', true),
+            // Minimum consecutive entry/add operations required before coalescing.
+            'coalesce_min_group' => env('LEDGER_BATCH_COALESCE_MIN_GROUP', 2),
+        ],
+        'entry' => [
+            // Max rows per journal_details insert.
+            'detail_chunk' => env('LEDGER_ENTRY_DETAIL_CHUNK', 1000),
+            // Max rows/keys per ledger_balances seed, lock, and upsert pass.
+            'balance_chunk' => env('LEDGER_ENTRY_BALANCE_CHUNK', 500),
+        ],
+        'metrics' => [
+            // Enable structured performance logs for entry posting paths.
+            'enabled' => env('LEDGER_PERFORMANCE_METRICS', false),
+        ],
+        'root' => [
+            // Max rows per opening-balance journal_details insert.
+            'detail_chunk' => env('LEDGER_ROOT_DETAIL_CHUNK', 1000),
+            // Max rows per opening-balance ledger_balances upsert.
+            'balance_chunk' => env('LEDGER_ROOT_BALANCE_CHUNK', 500),
+        ],
+    ],
     'session_key_prefix' => env('LEDGER_SESSION_PREFIX', 'ledger.'),
 ];

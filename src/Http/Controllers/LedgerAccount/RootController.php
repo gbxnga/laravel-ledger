@@ -11,10 +11,8 @@ use Abivia\Ledger\Messages\Balance;
 use Abivia\Ledger\Messages\Create;
 use Abivia\Ledger\Messages\EntityRef;
 use Abivia\Ledger\Messages\Message;
-use Abivia\Ledger\Models\JournalDetail;
 use Abivia\Ledger\Models\JournalEntry;
 use Abivia\Ledger\Models\LedgerAccount;
-use Abivia\Ledger\Models\LedgerBalance;
 use Abivia\Ledger\Models\LedgerCurrency;
 use Abivia\Ledger\Models\LedgerDomain;
 use Abivia\Ledger\Models\LedgerName;
@@ -336,7 +334,8 @@ class RootController extends LedgerAccountController
                     'reviewed'=> true,
                     'transDate'=> $transDate,
                 ]);
-
+                $detailRows = [];
+                $balanceDeltas = [];
                 foreach ($balances as $detail) {
                     $ledgerAccount = $this->accounts[$detail->account->code] ?? null;
                     if ($ledgerAccount === null) {
@@ -353,18 +352,46 @@ class RootController extends LedgerAccountController
                         );
                         continue;
                     }
-                    $journalDetail = new JournalDetail();
-                    $journalDetail->journalEntryId = $journalEntry->journalEntryId;
-                    $journalDetail->ledgerUuid = $ledgerAccount->ledgerUuid;
-                    $journalDetail->amount = bcadd('0', $detail->amount, $decimals);
-                    $journalDetail->save();
-                    // Create the ledger balances
-                    $ledgerBalance = new LedgerBalance();
-                    $ledgerBalance->ledgerUuid = $journalDetail->ledgerUuid;
-                    $ledgerBalance->domainUuid = $ledgerDomain->domainUuid;
-                    $ledgerBalance->currency = $detail->currency;
-                    $ledgerBalance->balance = bcadd('0', $detail->amount, $decimals);
-                    $ledgerBalance->save();
+                    $amount = bcadd('0', $detail->amount, $decimals);
+                    $detailRows[] = [
+                        'journalEntryId' => $journalEntry->journalEntryId,
+                        'ledgerUuid' => $ledgerAccount->ledgerUuid,
+                        'amount' => $amount,
+                        'journalReferenceUuid' => null,
+                    ];
+                    if (!isset($balanceDeltas[$ledgerAccount->ledgerUuid])) {
+                        $balanceDeltas[$ledgerAccount->ledgerUuid] = '0';
+                    }
+                    $balanceDeltas[$ledgerAccount->ledgerUuid] = bcadd(
+                        $balanceDeltas[$ledgerAccount->ledgerUuid],
+                        $amount,
+                        $decimals
+                    );
+                }
+                if (count($detailRows) === 0) {
+                    continue;
+                }
+                foreach (array_chunk($detailRows, $this->entryDetailChunkSize()) as $chunk) {
+                    DB::table('journal_details')->insert($chunk);
+                }
+                $timestamp = now()->format('Y-m-d H:i:s.u');
+                $balanceRows = [];
+                foreach ($balanceDeltas as $ledgerUuid => $balance) {
+                    $balanceRows[] = [
+                        'ledgerUuid' => $ledgerUuid,
+                        'domainUuid' => $ledgerDomain->domainUuid,
+                        'currency' => $currencyCode,
+                        'balance' => $balance,
+                        'created_at' => $timestamp,
+                        'updated_at' => $timestamp,
+                    ];
+                }
+                foreach (array_chunk($balanceRows, $this->balanceUpsertChunkSize()) as $chunk) {
+                    DB::table('ledger_balances')->upsert(
+                        $chunk,
+                        ['ledgerUuid', 'domainUuid', 'currency'],
+                        ['balance', 'updated_at']
+                    );
                 }
             }
         }
@@ -495,6 +522,22 @@ class RootController extends LedgerAccountController
         $sectionsOnly = new stdClass();
         $sectionsOnly->sections = $newSections;
         LedgerAccount::setRules($sectionsOnly);
+    }
+
+    private function balanceUpsertChunkSize(): int
+    {
+        return max(
+            1,
+            (int) config('ledger.performance.root.balance_chunk', 500)
+        );
+    }
+
+    private function entryDetailChunkSize(): int
+    {
+        return max(
+            1,
+            (int) config('ledger.performance.root.detail_chunk', 1000)
+        );
     }
 
     /**

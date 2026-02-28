@@ -64,6 +64,16 @@ Your published config (`config/ledger.php`), migrations, and database tables are
 
 The configuration file is installed as `config/ledger.php`. You can enable/disable the JSON API, set middleware, and a path prefix to the API.
 
+Performance chunk settings are configurable in `ledger.performance`:
+
+- `LEDGER_ENTRY_DETAIL_CHUNK` (default `1000`)
+- `LEDGER_ENTRY_BALANCE_CHUNK` (default `500`)
+- `LEDGER_ROOT_DETAIL_CHUNK` (default `1000`)
+- `LEDGER_ROOT_BALANCE_CHUNK` (default `500`)
+- `LEDGER_BATCH_COALESCE_ENTRY_ADD` (default `true`)
+- `LEDGER_BATCH_COALESCE_MIN_GROUP` (default `2`)
+- `LEDGER_PERFORMANCE_METRICS` (default `false`)
+
 ## Updating
 
 To ensure schema changes are in place, publish the configuration again and migrate:

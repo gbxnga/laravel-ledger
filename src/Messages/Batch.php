@@ -6,9 +6,11 @@ namespace Abivia\Ledger\Messages;
 use Abivia\Ledger\Exceptions\Breaker;
 use Abivia\Ledger\Helpers\Revision;
 use Abivia\Ledger\Http\Controllers\Api\ApiController;
+use Abivia\Ledger\Http\Controllers\JournalEntryController;
 use Abivia\Ledger\Models\LedgerAccount;
 use Exception;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class Batch extends Message
 {
@@ -125,6 +127,36 @@ class Batch extends Message
         return $messageClass;
     }
 
+    private function isBulkAddCandidate(Message $message): bool
+    {
+        return $message instanceof Entry
+            && (($message->getOpFlags() & self::ALL_OPS) === self::OP_ADD);
+    }
+
+    private function coalescingEnabled(): bool
+    {
+        return (bool) config('ledger.performance.batch.coalesce_entry_add', true);
+    }
+
+    private function coalescingMinGroup(): int
+    {
+        return max(2, (int) config('ledger.performance.batch.coalesce_min_group', 2));
+    }
+
+    private function performanceMetricsEnabled(): bool
+    {
+        return (bool) config('ledger.performance.metrics.enabled', false);
+    }
+
+    private function logBatchPerformance(array $context): void
+    {
+        if (!$this->performanceMetricsEnabled()) {
+            return;
+        }
+        Log::channel(config('ledger.log'))
+            ->info('ledger.performance.batch', $context);
+    }
+
     /**
      * @throws Exception
      */
@@ -137,8 +169,54 @@ class Batch extends Message
                 DB::beginTransaction();
             }
             Revision::startBatch();
-
-            foreach ($this->list as $step => $message) {
+            $count = count($this->list);
+            $entryController = null;
+            for ($step = 0; $step < $count; ++$step) {
+                $message = $this->list[$step];
+                if (
+                    $this->transaction
+                    && $this->coalescingEnabled()
+                    && $this->isBulkAddCandidate($message)
+                ) {
+                    $bulkMessages = [$message];
+                    while (
+                        $step + 1 < $count
+                        && $this->isBulkAddCandidate($this->list[$step + 1])
+                    ) {
+                        $bulkMessages[] = $this->list[++$step];
+                    }
+                    if (count($bulkMessages) >= $this->coalescingMinGroup()) {
+                        $startedAt = microtime(true);
+                        $entryController ??= new JournalEntryController();
+                        $journalEntries = $entryController->addBulk($bulkMessages);
+                        foreach ($bulkMessages as $index => $bulkMessage) {
+                            $results['batch'][] = [
+                                'entry' => $journalEntries[$index]->toResponse(
+                                    $bulkMessage->getOpFlags()
+                                )
+                            ];
+                        }
+                        $this->logBatchPerformance([
+                            'coalesced' => true,
+                            'group_size' => count($bulkMessages),
+                            'elapsed_ms' => round((microtime(true) - $startedAt) * 1000, 3),
+                        ]);
+                        continue;
+                    }
+                    $this->logBatchPerformance([
+                        'coalesced' => false,
+                        'group_size' => count($bulkMessages),
+                        'reason' => 'below_threshold',
+                    ]);
+                    foreach ($bulkMessages as $singleMessage) {
+                        $result = $singleMessage->run();
+                        $results['batch'][] = $result;
+                        if ($result['errors'] ?? false) {
+                            throw Breaker::withCode(Breaker::BATCH_FAILED);
+                        }
+                    }
+                    continue;
+                }
                 $result = $message->run();
                 $results['batch'][] = $result;
                 // Abort if this step failed
