@@ -1,18 +1,15 @@
-# General Ledger and Journal Accounting Package for Laravel with JSON API
+# Laravel Ledger
 
-Tests: ![php 8.0](https://github.com/abivia/ledger/actions/workflows/php80.yml/badge.svg) ![php 8.1](https://github.com/abivia/ledger/actions/workflows/php81.yml/badge.svg)
+[![Tests](https://github.com/gbxnga/laravel-ledger/actions/workflows/tests.yml/badge.svg)](https://github.com/gbxnga/laravel-ledger/actions/workflows/tests.yml)
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/gbxnga/laravel-ledger.svg)](https://packagist.org/packages/gbxnga/laravel-ledger)
+[![PHP Version](https://img.shields.io/packagist/php-v/gbxnga/laravel-ledger.svg)](https://packagist.org/packages/gbxnga/laravel-ledger)
+[![License](https://img.shields.io/packagist/l/gbxnga/laravel-ledger.svg)](https://packagist.org/packages/gbxnga/laravel-ledger)
 
-Ledger lets you track anything related to money in your application with a
-single package while making your CFO happy at the same time. No matter if
-your app is handling memberships for a small club or supporting a multinational
-enterprise, Ledger can handle it.
+General Ledger and Journal Accounting Package for Laravel with JSON API.
 
-Ledger is a full-featured implementation of the core of any good accounting system, a double-entry
-journal and general ledger. It is not a complete accounting solution, but rather the minimum for
-keeping track of financial transactions. Ledger features a JSON API that provides access to all
-functions.
+A maintained fork of [abivia/ledger](https://github.com/abivia/ledger), upgraded to support modern PHP and Laravel versions.
 
-That's the only minimal part. Ledger features:
+## Features
 
 - Full double-entry accounting system with audit trail capability.
 - Multi-currency support.
@@ -22,52 +19,81 @@ That's the only minimal part. Ledger features:
 - Integrates via direct controller access or through JSON API.
 - Atomic transactions with concurrent update blocking.
 - Reference system supports soft linking to other ERP components.
-- Designed for Laravel from the ground up.
 
-## Documentation
+## Requirements
 
-Full documentation is available [here](https://ledger.abivia.com/).
+- PHP 8.2+
+- Laravel 11 or 12
 
-## Updates and Chat
+## Installation
 
-We've moved from Twitter to [Mastodon](https://fosstodon.org/@abivia). Come join us!
-
-
-## Quick start
-
-### Installation and Configuration
-
-Install Ledger with composer:
-
-`composer require abivia/ledger`
+```bash
+composer require gbxnga/laravel-ledger
+```
 
 Publish configuration:
 
-`php artisan vendor:publish --provider="Abivia\Ledger\LedgerServiceProvider"`
-
-Create database tables
-
-`php artisan migrate`
-
-### Configuration
-
-The configuration file is installed as `config\ledger.php`. You can enable/disable the 
-JSON API, set middleware, and a path prefix to the API.
-
-### Updating
-
-To ensure schema changes are in place publish the configuration again and migrate:
-
+```bash
+php artisan vendor:publish --provider="Abivia\Ledger\LedgerServiceProvider"
 ```
+
+Create database tables:
+
+```bash
+php artisan migrate
+```
+
+## Migrating from abivia/ledger
+
+If you're currently using `abivia/ledger`, you can switch to this package with minimal effort. All PHP namespaces (`Abivia\Ledger\*`) remain unchanged, so your application code works as-is.
+
+1. Swap the package:
+
+```bash
+composer remove abivia/ledger
+composer require gbxnga/laravel-ledger
+```
+
+2. Update your PHP and Laravel versions if needed:
+   - PHP 8.2+ (previously 8.0+)
+   - Laravel 11 or 12 (previously Laravel 8+)
+
+Your published config (`config/ledger.php`), migrations, and database tables are not affected by the package swap. No changes are needed to your service provider references, config files, migrations, or any code that uses `Abivia\Ledger` classes.
+
+## Configuration
+
+The configuration file is installed as `config/ledger.php`. You can enable/disable the JSON API, set middleware, and a path prefix to the API.
+
+## Updating
+
+To ensure schema changes are in place, publish the configuration again and migrate:
+
+```bash
 php artisan vendor:publish --provider="Abivia\Ledger\LedgerServiceProvider"
 php artisan migrate
 ```
 
+## Testing
 
-## Donations welcome
+```bash
+composer test
+```
 
-Abivia is a small business. Even small donations go a long way.
+With coverage:
 
-If you're getting something out of Ledger, you can sponsor us in any amount you wish using Liberapay
-[![Liberapay](https://liberapay.com/assets/widgets/donate.svg)](https://liberapay.com/abivia/donate).
-Liberapay is itself run on donations and charges no fees beyond bank charges.
+```bash
+composer test-coverage
+```
+
+## Documentation
+
+Full documentation is available at [ledger.abivia.com](https://ledger.abivia.com/).
+
+## Credits
+
+- [Alan Langford](https://github.com/abivia) - Original author
+- [Gbenga Oni](https://github.com/gbxnga) - Maintainer of this fork
+
+## License
+
+MIT. See [LICENSE](LICENSE.md) for details.
